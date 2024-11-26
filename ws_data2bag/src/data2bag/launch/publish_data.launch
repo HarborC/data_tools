@@ -1,0 +1,16 @@
+<launch>
+    <param name="flag" type="int" value="0"/>
+
+    <node pkg="data2bag" type="pcl2bag_node" name="pcl_2bag" output="screen">
+        <param name="pcl_folder" type="string" value="/mnt/g/projects/test_data/1/horizon_lidar" />
+    </node>
+
+    <node pkg="data2bag" type="imu2bag_node" name="imu_2bag" output="screen">
+        <param name="imu_file" type="string" value = "/mnt/g/projects/test_data/1/horizon_imu.txt" />
+    </node>
+
+    <node pkg="data2bag" type="gps2bag_node" name="gps_2bag" output="screen">
+        <param name="gps_file" type="string" value = "/mnt/g/projects/test_data/1/gps.txt" />
+    </node>
+
+</launch>

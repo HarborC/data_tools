@@ -1,0 +1,13 @@
+<launch>
+    <!-- <node pkg="data2bag" type="data2bag_node" name="data_2bag" output="screen">
+        <param name="root_dir" type="string" value = "/mnt/g/data/AVD/2024-11/2024-11-24_15-34-54" />
+        <param name="start_time" type="double" value = "1732433732.799336910" />
+        <param name="end_time" type="double" value = "-1" />
+    </node> -->
+
+    <node pkg="data2bag" type="data2bag_node" name="data_2bag" output="screen">
+        <param name="root_dir" type="string" value = "/mnt/g/data/AVD/2024-11/2024-11-26_11-11-17" />
+        <param name="start_time" type="double" value = "1732590728.599605083" />
+        <param name="end_time" type="double" value = "-1" />
+    </node>
+</launch>
