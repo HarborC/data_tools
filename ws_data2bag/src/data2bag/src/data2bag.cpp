@@ -29,14 +29,12 @@
 
 using namespace hx_slam::io;
 
-void imu2Bag(rosbag::Bag& bag, std::string path);
-void camera2Bag(rosbag::Bag& bag, std::string dir_name);
-void lidar2Bag(rosbag::Bag& bag, std::string dir_name);
-void gps2Bag(rosbag::Bag& bag, std::string path);
+void imu2Bag(rosbag::Bag& bag, std::string path, double start_time, double end_time);
+void camera2Bag(rosbag::Bag& bag, std::string dir_name, double start_time, double end_time);
+void lidar2Bag(rosbag::Bag& bag, std::string dir_name, double start_time, double end_time);
+void gps2Bag(rosbag::Bag& bag, std::string path, double start_time, double end_time);
 
 double G = 9.81;
-double start_time = -1;
-double end_time = -1;
 
 namespace velodyne_ros {
   struct EIGEN_ALIGN16 Point {
@@ -62,6 +60,8 @@ int main(int argc, char** argv) {
     ros::NodeHandle nh("~");
 
     std::string root_dir;
+    double start_time = -1;
+    double end_time = -1;
 
     // 从参数服务器读取参数
     if (!nh.getParam("root_dir", root_dir)) {
@@ -84,38 +84,45 @@ int main(int argc, char** argv) {
     ROS_INFO("Start Time: %.9f", start_time);
     ROS_INFO("End Time: %.9f", end_time);
 
-    std::string bag_path = root_dir + "/data.bag";
-    rosbag::Bag bag;
-    bag.open(bag_path, rosbag::bagmode::Write);
+    int idx = 0;
+    double duration = 300.0;
+    while (start_time + idx * duration < end_time) {
+        std::string bag_path = root_dir + "/data" + std::to_string(idx) + ".bag";
+        rosbag::Bag bag;
+        bag.open(bag_path, rosbag::bagmode::Write);
+        bag.setCompression(rosbag::compression::LZ4);
 
-    std::cout << "start" << std::endl;
+        std::cout << "start " << idx << std::endl;
 
-    std::string imu_path = root_dir + "/horizon_imu.txt";
-    imu2Bag(bag, imu_path);
+        std::string imu_path = root_dir + "/horizon_imu.txt";
+        imu2Bag(bag, imu_path, start_time + idx * duration, start_time + (idx + 1) * duration);
 
-    std::cout << "imu done" << std::endl;
+        std::cout << "imu done" << std::endl;
 
-    std::string gps_path = root_dir + "/gps.txt";
-    gps2Bag(bag, gps_path);
+        std::string gps_path = root_dir + "/gps.txt";
+        gps2Bag(bag, gps_path, start_time + idx * duration, start_time + (idx + 1) * duration);
 
-    std::cout << "gps done" << std::endl;
+        std::cout << "gps done" << std::endl;
 
-    std::string horizon_lidar_path = root_dir + "/horizon_lidar/";
-    lidar2Bag(bag, horizon_lidar_path);
+        std::string horizon_lidar_path = root_dir + "/horizon_lidar/";
+        lidar2Bag(bag, horizon_lidar_path, start_time + idx * duration, start_time + (idx + 1) * duration);
 
-    std::cout << "lidar done" << std::endl;
+        std::cout << "lidar done" << std::endl;
 
-    std::string hkvison_image_path = root_dir + "/hkvison_image/";
-    camera2Bag(bag, hkvison_image_path);
+        std::string hkvison_image_path = root_dir + "/hkvison_image/";
+        camera2Bag(bag, hkvison_image_path, start_time + idx * duration, start_time + (idx + 1) * duration);
 
-    std::cout << "camera done" << std::endl;
+        std::cout << "camera done" << std::endl;
 
-    bag.close();
+        bag.close();
 
+        idx++;
+    }
+    
     return 0;
 }
 
-void imu2Bag(rosbag::Bag& bag, std::string path) {
+void imu2Bag(rosbag::Bag& bag, std::string path, double start_time, double end_time) {
     std::ifstream imu_file(path);
     std::string line;
     while (std::getline(imu_file, line)) {
@@ -136,7 +143,7 @@ void imu2Bag(rosbag::Bag& bag, std::string path) {
             continue;
         }
 
-        if (end_time > 0 && timestamp > end_time) {
+        if (end_time > 0 && timestamp >= end_time) {
             break;
         }
 
@@ -162,7 +169,7 @@ void imu2Bag(rosbag::Bag& bag, std::string path) {
     imu_file.close();
 }
 
-void camera2Bag(rosbag::Bag& bag, std::string dir_name) {
+void camera2Bag(rosbag::Bag& bag, std::string dir_name, double start_time, double end_time) {
     std::vector<std::string> img_paths = GetFileList(dir_name);
 
     for (size_t i = 0; i < img_paths.size(); i++) {
@@ -177,7 +184,7 @@ void camera2Bag(rosbag::Bag& bag, std::string dir_name) {
             continue;
         }
 
-        if (end_time > 0 && timestamp > end_time) {
+        if (end_time > 0 && timestamp >= end_time) {
             break;
         }
 
@@ -187,7 +194,13 @@ void camera2Bag(rosbag::Bag& bag, std::string dir_name) {
             continue;
         }
 
-        sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "bgr", img).toImageMsg();
+        int width = img.cols;
+        int height = img.rows;
+        cv::resize(img, img, cv::Size(width/2, height/2), 0, 0, cv::INTER_AREA);
+
+        std::cout << "(" << i << "/" << img_paths.size() << ") " << img_paths[i] << " loading" << std::endl;
+
+        sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", img).toImageMsg();
         msg->header.stamp = ros::Time(timestamp);
         msg->header.frame_id = "base_link";
 
@@ -195,7 +208,7 @@ void camera2Bag(rosbag::Bag& bag, std::string dir_name) {
     }
 }
 
-void lidar2Bag(rosbag::Bag& bag, std::string dir_name) {
+void lidar2Bag(rosbag::Bag& bag, std::string dir_name, double start_time, double end_time) {
     typedef pcl::PointXYZINormal PointT;
     typedef pcl::PointCloud<PointT>::Ptr PointPtr;
 
@@ -213,7 +226,7 @@ void lidar2Bag(rosbag::Bag& bag, std::string dir_name) {
             continue;
         }
 
-        if (end_time > 0 && timestamp > end_time) {
+        if (end_time > 0 && timestamp >= end_time) {
             break;
         }
 
@@ -222,7 +235,10 @@ void lidar2Bag(rosbag::Bag& bag, std::string dir_name) {
         PointPtr cloud(new pcl::PointCloud<PointT>);
         if (pcl::io::loadPCDFile(lidar_paths[i], *cloud) == -1) {
             std::cout << "点云数据读取失败: "<< lidar_paths[i] << std::endl;
+            continue;
         }
+
+        std::cout << "(" << i << "/" << lidar_paths.size() << ") " << lidar_paths[i] << " loading" << std::endl;
 
         for(int index=0; index < cloud->points.size(); index++){
             velodyne_ros::Point added_pt;
@@ -248,7 +264,7 @@ void lidar2Bag(rosbag::Bag& bag, std::string dir_name) {
     }
 }
 
-void gps2Bag(rosbag::Bag& bag, std::string path) {
+void gps2Bag(rosbag::Bag& bag, std::string path, double start_time, double end_time) {
     std::ifstream gps_file(path);
     std::string line;
     while (std::getline(gps_file, line)) {
@@ -270,7 +286,7 @@ void gps2Bag(rosbag::Bag& bag, std::string path) {
             continue;
         }
 
-        if (end_time > 0 && timestamp > end_time) {
+        if (end_time > 0 && timestamp >= end_time) {
             break;
         }
 
