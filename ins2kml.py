@@ -20,7 +20,7 @@ def main(input_file, output_file):
     # 创建一个 simplekml 对象
     kml = simplekml.Kml()
 
-    freq = 1
+    freq = 20
     if freq < 1:
         raise ValueError("Sampling frequency (freq) must be a positive integer.")
 

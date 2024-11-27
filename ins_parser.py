@@ -10,7 +10,7 @@ def parse_gps_time(gps_week, sow):
     gps_epoch = datetime(1980, 1, 6)  # GPS epoch start
     total_seconds = gps_week * 7 * 24 * 3600 + sow
     utc_time = gps_epoch + timedelta(seconds=total_seconds)
-    return int(utc_time.timestamp())
+    return utc_time.timestamp()
 
 def parse_inspvaxa(data):
     parsed_data = []
