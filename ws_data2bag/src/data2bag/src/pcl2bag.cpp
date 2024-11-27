@@ -1,71 +1,23 @@
-#include "ros/ros.h"
-#include "opencv2/highgui.hpp"
-#include "flag.h"
-#include <iostream>
-#include <vector>
-#include <glob.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <sstream>
-#include <pcl/point_types.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/io/ply_io.h>
+#include <ros/ros.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <sstream>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <vector>
 
+#include <pcl/io/pcd_io.h>
+#include <pcl/io/ply_io.h>
+#include <pcl/point_types.h>
 
+#include "io_tools.h"
 
-std::vector<std::string> GetFiles(std::string dirPath)
-{
-    std::vector<std::string> files;
-    struct dirent *ptr;
-    char base[1000];
-    DIR *dir;
-    dir = opendir(dirPath.c_str());
-    while((ptr = readdir(dir)) != nullptr){
-        if(ptr->d_type == 8){
-            files.push_back(dirPath + '/' + ptr->d_name);
-        }
-    }
-    closedir(dir);
-    std::sort(files.begin(),files.end());
-    //for(size_t idx = 0; idx <files.size(); idx++){
-        //std::cout<< files[idx] <<std::endl;
-    //}
-    return files;
-}
-
-std::vector<std::string> StringSplit(std::string str,std::string pattern)
-{
-  std::string::size_type pos;
-  std::vector<std::string> result;
-  str+=pattern;
-  int size=str.size();
- 
-  for(int i=0; i<size; i++)
-  {
-    pos=str.find(pattern,i);
-    if(pos<size)
-    {
-      std::string s=str.substr(i,pos-i);
-      result.push_back(s);
-      i=pos+pattern.size()-1;
-    }
-  }
-  return result;
-}
-
-ros::Time TimestampToRosTime(std::string timestamp)
-{
-    size_t len = timestamp.length();
-    size_t secLen = len - 9;
-    std::string sec_string = timestamp.substr(0,secLen);
-    std::string nsec_string = timestamp.substr(secLen,9);
-    return ros::Time(std::stoi(sec_string),std::stoi(nsec_string));
-}
+using namespace hx_slam::io;
 
 typedef pcl::PointXYZINormal PointT;
 typedef pcl::PointCloud<PointT>::Ptr PointPtr;
@@ -79,6 +31,7 @@ namespace velodyne_ros {
       EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   };
 }  // namespace velodyne_ros
+
 POINT_CLOUD_REGISTER_POINT_STRUCT(velodyne_ros::Point,
     (float, x, x)
     (float, y, y)
@@ -88,50 +41,66 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(velodyne_ros::Point,
     (uint16_t, ring, ring)
 )
 
-ros::Publisher pcd_pub;
-void ReadDirectory(int argc, char** argv)
-{
+int main(int argc, char** argv) {
+    ros::init(argc, argv, "lidar_node");
+    ros::NodeHandle nh("~");
 
+    std::string root_dir;
+    double start_time = -1;
+    double end_time = -1;
 
-    //读取文件夹
-    ros::init(argc,argv,"image_publisher");
-    ros::NodeHandle nh;
-    std::string imgPath="/mnt/g/projects/test_data/1/horizon_lidar";
-    nh.getParam("pcl_folder", imgPath);
-    std::cout<< "read pcl path success!"<<imgPath<<std::endl;
+    if (!nh.getParam("root_dir", root_dir)) {
+        ROS_ERROR("Failed to get parameter 'root_dir'");
+        return 1;
+    }
 
-    //-----------
-    pcd_pub = nh.advertise<sensor_msgs::PointCloud2>("/pcd_pcl", 100);
+    if (!nh.getParam("start_time", start_time)) {
+        ROS_ERROR("Failed to get parameter 'start_time'");
+        return 1;
+    }
 
-    //读取文件
-    std::vector<std::string> imgPaths = GetFiles(imgPath);//argv[1]
-    std::cout <<  imgPaths.size();
+    if (!nh.getParam("end_time", end_time)) {
+        ROS_WARN("Failed to get parameter 'end_time', defaulting to -1");
+        end_time = -1;  // 设置默认值
+    }
+
+    ROS_INFO("Root Directory: %s", root_dir.c_str());
+    ROS_INFO("Start Time: %.9f", start_time);
+    ROS_INFO("End Time: %.9f", end_time);
+
+    std::string horizon_lidar_path = root_dir + "/horizon_lidar/";
+    ros::Publisher pcd_pub = nh.advertise<sensor_msgs::PointCloud2>("/horizon_lidar/data", 100);
     ros::Rate loopRate(10);
 
+    std::vector<std::string> lidar_paths = GetFileList(horizon_lidar_path);
 
-    for(size_t imgIdx = 0; imgIdx < imgPaths.size(); imgIdx++){
+    for (size_t i = 0; i < lidar_paths.size(); i++) {
+        std::vector<std::string> spilts = StringSplit(lidar_paths[i], "/");
+        std::string timestamp_str = StringSplit(spilts.back(), ".").front();
+        std::stringstream ss; ss << timestamp_str;
+        double timestamp; ss >> timestamp;
 
-        if(!nh.ok()){
+        timestamp = timestamp * 1e-9;
+
+        if (start_time > 0 && timestamp < start_time) {
+            continue;
+        }
+
+        if (end_time > 0 && timestamp >= end_time) {
             break;
         }
 
         pcl::PointCloud<velodyne_ros::Point> pl_orig;
 
-        //文件名、时间戳获取
-        std::vector<std::string> pathSplits = StringSplit(imgPaths[imgIdx], "/");
-        std::string timestamp = StringSplit(pathSplits.back(),".").front();
-        std::string stringStream;
-        stringStream = imgPaths[imgIdx];
-
-        // std::cout << stringStream << std::endl;
-
         PointPtr cloud(new pcl::PointCloud<PointT>);
-        if (pcl::io::loadPCDFile(stringStream, *cloud) == -1)
-        {
-            std::cout << "点云数据读取失败: "<< stringStream << std::endl;
+        if (pcl::io::loadPCDFile(lidar_paths[i], *cloud) == -1) {
+            std::cout << "点云数据读取失败: "<< lidar_paths[i] << std::endl;
+            continue;
         }
-        for(int index=0 ; index < cloud->points.size() ; index++){
 
+        std::cout << "(" << i << "/" << lidar_paths.size() << ") " << lidar_paths[i] << " loading" << std::endl;
+
+        for(int index=0; index < cloud->points.size(); index++){
             velodyne_ros::Point added_pt;
             added_pt.x = cloud->points[index].x;
             added_pt.y = cloud->points[index].y;
@@ -139,47 +108,23 @@ void ReadDirectory(int argc, char** argv)
 
             added_pt.intensity = cloud->points[index].intensity;
             auto tmp_cur =  cloud->points[index].curvature;
-            added_pt.time = (cloud->points[index].curvature-static_cast<int>(tmp_cur))*10.0;
-
-            // ROS_INFO("int=%0.20f, decimal=%0.20f \n", tmp_cur, added_pt.time);
+            added_pt.time = (cloud->points[index].curvature-static_cast<int>(tmp_cur)) * 10.0;
 
             pl_orig.points.push_back(added_pt);
             added_pt.ring = 1;
-
-
         }
 
-        sensor_msgs::PointCloud2 laserCloud;
-        pcl::toROSMsg(pl_orig, laserCloud);
+        sensor_msgs::PointCloud2 laser_cloud;
+        pcl::toROSMsg(pl_orig, laser_cloud);
 
+        laser_cloud.header.stamp = ros::Time(timestamp);
+        laser_cloud.header.frame_id = "base_link";
 
-        // double h;
-        // h = 0.31231242314135;
-        ros::Time timestamp_ros = TimestampToRosTime(timestamp);
-        laserCloud.header.stamp = timestamp_ros;
-        laserCloud.header.frame_id = "scan";
-        // std::cout<<std::fixed<< std::setprecision(9)<<timestamp_ros.toSec()<<std::endl;
-        // std::cout<<timestamp_ros.toNSec()<<std::endl;
-        // std::cout << h <<std::endl;
-        // cv::Mat img = cv::imread(stringStream.str(), CV_LOAD_IMAGE_COLOR);
-        // sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", laserCloud).toImageMsg();
-        //msg->header.stamp = ros::Time(timestampInt);
-        // msg->header.stamp = TimestampToRosTime(timestamp);
-        //std::cout<<std::fixed<<std::endl<<"laser："<<laserCloud.header.stamp<<std::endl;
-
-  
-        // flag_xx.show_flag();
-        pcd_pub.publish(laserCloud);
+        pcd_pub.publish(laser_cloud);
 
         ros::spinOnce();
         loopRate.sleep();
     }
-}
-
-
-int main(int argc, char** argv)
-{
-    ReadDirectory(argc,argv);
 
     return 0;
 }

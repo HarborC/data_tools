@@ -308,4 +308,5 @@ void gps2Bag(rosbag::Bag& bag, std::string path, double start_time, double end_t
 
         bag.write("/gps/rtk", gps_data.header.stamp, gps_data);
     }
+    gps_file.close();
 }

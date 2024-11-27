@@ -1,103 +1,88 @@
-#include "ros/ros.h"
-#include "sensor_msgs/Imu.h"
+#include <ros/ros.h>
+#include <sensor_msgs/Imu.h>
 #include <fstream>
 #include <iostream>
 #include <vector>
-#include "flag.h"
 
+#include "io_tools.h"
 
+using namespace hx_slam::io;
 
-std::vector<std::string> StringSplit(std::string str,std::string pattern)
-{
-  std::string::size_type pos;
-  std::vector<std::string> result;
-  str+=pattern;
-  int size=str.size();
- 
-  for(int i=0; i<size; i++)
-  {
-    pos=str.find(pattern,i);
-    if(pos<size)
-    {
-      std::string s=str.substr(i,pos-i);
-      result.push_back(s);
-      i=pos+pattern.size()-1;
-    }
-  }
-  return result;
-}
+double G = 9.81;
 
-ros::Time TimestampToRosTime(std::string timestamp)
-{
-    size_t len = timestamp.length();
-    size_t secLen = len - 9;
-    std::string sec_string = timestamp.substr(0,secLen);
-    std::string nsec_string = timestamp.substr(secLen,9);
-    //while(nsec_string.length() < 9){
-        //nsec_string += "0";
-    //}
-    return ros::Time(std::stoi(sec_string),std::stoi(nsec_string));
-}
+int main(int argc, char** argv) {
+    ros::init(argc, argv, "imu_node");
+    ros::NodeHandle nh("~");
 
-double StringToDouble(std::string strData)
-
-{
-    return std::stod(strData);
-}
-
-
-
-
-int main(int argc, char** argv)
-{
-    if (argc<2){
-        std::cout<<"input imu path!"<<std::endl;
-        return -1;
+    std::string root_dir;
+    double start_time = -1;
+    double end_time = -1;
+    
+    if (!nh.getParam("root_dir", root_dir)) {
+        ROS_ERROR("Failed to get parameter 'root_dir'");
+        return 1;
     }
 
-    ros::init(argc,argv, "imu_publisher");
-    ros::NodeHandle nh;
-    //读取文件
-    std::string imuFilePath="/mnt/g/projects/test_data/1/horizon_imu.txt";
-    nh.getParam("imu_file",imuFilePath);
-    std::cout<<"input imu path success!"<<imuFilePath<<std::endl;
-    ros::Publisher imuPub = nh.advertise<sensor_msgs::Imu>("/imu_data", 1000000);
+    if (!nh.getParam("start_time", start_time)) {
+        ROS_ERROR("Failed to get parameter 'start_time'");
+        return 1;
+    }
+
+    if (!nh.getParam("end_time", end_time)) {
+        ROS_WARN("Failed to get parameter 'end_time', defaulting to -1");
+        end_time = -1;  // 设置默认值
+    }
+
+    ROS_INFO("Root Directory: %s", root_dir.c_str());
+    ROS_INFO("Start Time: %.9f", start_time);
+    ROS_INFO("End Time: %.9f", end_time);
+
+    std::string imu_path = root_dir + "/horizon_imu.txt";
+
+    ros::Publisher imu_pub = nh.advertise<sensor_msgs::Imu>("/imu/horizon_data", 1000000);
     ros::Rate loopRate(200);
 
-    std::fstream imuFile(imuFilePath);
-    std::string readLine;
-    // std::getline(imuFile,readLine);
+    std::ifstream imu_file(imu_path);
+    std::string line;
+    while (std::getline(imu_file, line)) {
+        if (line[0] == '#' || line.empty()) {
+            continue;
+        }
 
-    while(ros::ok() && std::getline(imuFile,readLine)){
-        //std::cout<<readLine<<std::endl;
-        std::vector<std::string> lineSplit = StringSplit(readLine," ");
-        // if(lineSplit.size()<6){
-        //     continue;
-        // }
+        std::istringstream iss(line);
+        double timestamp;
+        double wx, wy, wz;
+        double ax, ay, az;
+        iss >> timestamp >> wx >> wy >> wz >> ax >> ay >> az;
+        // std::cout << timestamp << " " << wx << " " << wy << " " << wz << " " << ax << " " << ay << " " << az << std::endl;
 
-        sensor_msgs::Imu imuData;
-        std::string timestamp = lineSplit[0];
-        imuData.header.stamp = TimestampToRosTime(timestamp);
-        
+        timestamp = timestamp * 1e-9;
 
-        imuData.header.frame_id = "scan";
-        imuData.angular_velocity.x = StringToDouble(lineSplit[1]);
-        imuData.angular_velocity.y = StringToDouble(lineSplit[2]);
-        imuData.angular_velocity.z = StringToDouble(lineSplit[3]);
+        if (start_time > 0 && timestamp < start_time) {
+            continue;
+        }
 
-        imuData.linear_acceleration.x = StringToDouble(lineSplit[4]);
-        imuData.linear_acceleration.y = StringToDouble(lineSplit[5]);
-        imuData.linear_acceleration.z = StringToDouble(lineSplit[6]);
+        if (end_time > 0 && timestamp >= end_time) {
+            break;
+        }
 
-      // std::cout<<std::fixed<<"imu："<<imuData.header.stamp<<std::endl;
+        sensor_msgs::Imu imu_data;
+        imu_data.header.stamp = ros::Time(timestamp);
+    
+        imu_data.header.frame_id = "base_link";
+        imu_data.angular_velocity.x = wx;
+        imu_data.angular_velocity.y = wy;
+        imu_data.angular_velocity.z = wz;
+        imu_data.linear_acceleration.x = ax * G;
+        imu_data.linear_acceleration.y = ay * G;
+        imu_data.linear_acceleration.z = az * G;
 
-        // flag_xx.add_flag();
-        // flag_xx.show_flag();
-        imuPub.publish(imuData);
+        imu_pub.publish(imu_data);
         ros::spinOnce();
         loopRate.sleep();
     }
 
-    imuFile.close();
+    imu_file.close();
+
     return 0;
 }
