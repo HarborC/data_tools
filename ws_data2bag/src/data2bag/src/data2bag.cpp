@@ -280,7 +280,7 @@ void gps2Bag(rosbag::Bag& bag, std::string path, double start_time, double end_t
         double lat, lon, alt;
         double sat_num;
         double x_factor, y_factor, z_factor;
-        ss >> timestamp >> lon >> lat >> alt >> sat_num >> x_factor >> y_factor >> z_factor;
+        ss >> timestamp >> lat >> lon >> alt >> sat_num >> x_factor >> y_factor >> z_factor;
 
         if (start_time > 0 && timestamp < start_time) {
             continue;
